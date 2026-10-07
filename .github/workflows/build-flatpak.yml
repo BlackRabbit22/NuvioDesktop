@@ -1,0 +1,67 @@
+name: Build Flatpak
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  flatpak:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install Linux build dependencies
+        run: bash ./scripts/linux/install-desktop-build-dependencies.sh
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build Linux app bundle
+        run: |
+          set -euo pipefail
+          ./gradlew :composeApp:createReleaseDistributable \
+            -Pcompose.desktop.packaging.checkJdkVendor=false \
+            --no-configuration-cache \
+            --no-daemon \
+            --stacktrace
+          app_root="${GITHUB_WORKSPACE}/composeApp/build/compose/binaries/main-release/app/Nuvio"
+          if [ -d "${app_root}/Nuvio" ]; then app_root="${app_root}/Nuvio"; fi
+          test -d "${app_root}"
+
+      - name: Install Flatpak toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder desktop-file-utils
+          sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y --system flathub org.gnome.Platform//50 org.gnome.Sdk//50
+
+      - name: Build Flatpak bundle
+        run: |
+          set -euo pipefail
+          app_root="${GITHUB_WORKSPACE}/composeApp/build/compose/binaries/main-release/app/Nuvio"
+          if [ -d "${app_root}/Nuvio" ]; then app_root="${app_root}/Nuvio"; fi
+          mkdir -p flatpak
+          cp scripts/linux/nuvio-launcher.sh flatpak/nuvio-launcher.sh
+          cp scripts/linux/linux-shortcut-definition.sh flatpak/linux-shortcut-definition.sh
+          cp scripts/linux/com.nuvio.media.desktop.metainfo.xml flatpak/com.nuvio.media.desktop.metainfo.xml
+          chmod +x flatpak/nuvio-launcher.sh
+          sed -i "s|date=\"1970-01-01\"|date=\"$(date -u +%F)\"|" flatpak/com.nuvio.media.desktop.metainfo.xml
+          cp scripts/linux/nuvio-flatpak.yml flatpak/nuvio-flatpak.yml
+          sed -i "s|\${app_root}|${app_root}|g" flatpak/nuvio-flatpak.yml
+          flatpak-builder --repo=flatpak-repo --force-clean flatpak-build flatpak/nuvio-flatpak.yml
+          flatpak build-bundle flatpak-repo Nuvio-Linux-x86_64.flatpak com.nuvio.media.desktop
+
+      - name: Upload Flatpak
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuvio-linux-flatpak
+          path: Nuvio-Linux-x86_64.flatpak
+          if-no-files-found: error
+          retention-days: 14
