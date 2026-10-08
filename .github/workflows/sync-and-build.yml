@@ -1,0 +1,49 @@
+name: Sync upstream and build Flatpak
+
+on:
+  schedule:
+    - cron: '23 5 * * *'   # daily 05:23 UTC
+  workflow_dispatch:
+  push:
+    branches: [Dev]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-and-build
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Merge upstream Dev
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@v6
+        with:
+          ref: Dev
+          fetch-depth: 0
+
+      - name: Merge NuvioMedia Dev
+        id: merge
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/NuvioMedia/NuvioDesktop.git
+          git fetch upstream Dev
+
+          if git merge-base --is-ancestor upstream/Dev Dev; then
+            echo "Already up to date with upstream."
+            exit 0
+          fi
+
+          git merge --no-edit upstream/Dev
+          git push origin Dev
+          echo "Merged upstream $(git rev-parse --short upstream/Dev) into Dev."
+
+  build:
+    name: Build Flatpak
+    needs: sync
+    uses: ./.github/workflows/build-flatpak.yml
