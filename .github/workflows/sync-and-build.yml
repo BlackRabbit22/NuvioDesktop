@@ -41,7 +41,19 @@ jobs:
             exit 0
           fi
 
+          before=$(git rev-parse HEAD)
           git merge --no-edit upstream/Dev
+
+          # GITHUB_TOKEN cannot push changes to .github/workflows/ (no "workflows"
+          # permission exists for it), so keep our workflow files when upstream
+          # modifies theirs. We never run their release pipeline anyway.
+          if ! git diff --quiet "$before" HEAD -- .github/workflows; then
+            echo "Upstream changed workflow files - keeping ours (GITHUB_TOKEN restriction)."
+            git rm -r -q --ignore-unmatch .github/workflows
+            git checkout "$before" -- .github/workflows
+            git commit --amend --no-edit
+          fi
+
           git push origin Dev
           echo "Merged upstream $(git rev-parse --short upstream/Dev) into Dev."
 
